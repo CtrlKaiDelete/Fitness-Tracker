@@ -4,10 +4,17 @@ namespace {
 
     static constexpr uintptr_t Port0OutputSet = 0x50000508;
     static constexpr uintptr_t Port0OutputClear = 0x5000050C;
+    static constexpr uintptr_t Port0Input = 0x50000510;
     static constexpr uintptr_t Port0DirectionSet = 0x50000518;
+    static constexpr uintptr_t Port0DirectionClear = 0x5000051C;
+    static constexpr uintptr_t Port0PinConfigButtonA = 0x50000738;
+    static constexpr uintptr_t Port0PinConfigButtonB = 0x5000075C;
     static constexpr uintptr_t Port1OutputSet = 0x50000808;
     static constexpr uintptr_t Port1OutputClear = 0x5000080C;
+    static constexpr uintptr_t Port1Input = 0x50000810;
     static constexpr uintptr_t Port1DirectionSet = 0x50000818;
+    static constexpr uintptr_t Port1DirectionClear = 0x5000081C;
+    static constexpr uintptr_t Port1PinConfigLogo = 0x50000A10;
     static constexpr uintptr_t Timer0Stop = 0x40008004;
     static constexpr uintptr_t Timer1Stop = 0x40009004;
     static constexpr uintptr_t Timer2Stop = 0x4000A004;
@@ -36,6 +43,9 @@ namespace {
     static constexpr uintptr_t SysTickControl = 0xE000E010;
     static constexpr uintptr_t SysTickReload = 0xE000E014;
     static constexpr uintptr_t SysTickCurrent = 0xE000E018;
+    static constexpr uintptr_t DebugExceptionControl = 0xE000EDFC;
+    static constexpr uintptr_t CycleCounterControl = 0xE0001000;
+    static constexpr uintptr_t CycleCounter = 0xE0001004;
 
     static constexpr uintptr_t I2cStartTransmit = 0x40004008;
     static constexpr uintptr_t I2cStop = 0x40004014;
@@ -62,6 +72,10 @@ namespace {
     static constexpr int ColumnPorts[5] = {0, 0, 0, 1, 0};
     static constexpr int ColumnPins[5] = {28, 11, 31, 5, 30};
     static constexpr uint32_t SpeakerPin = 0;
+    static constexpr uint32_t LogoPin = 4;
+    static constexpr uint32_t ButtonAPin = 14;
+    static constexpr uint32_t ButtonBPin = 23;
+    static constexpr uint32_t InputConnectedPullUp = 0x0000000C;
     static constexpr uint32_t PwmClock = 1000000;
     static constexpr uint32_t DisconnectedOutput = 0xFFFFFFFF;
 
@@ -97,17 +111,33 @@ namespace {
         0b00000
     };
 
+    static constexpr uint8_t LogoMark[5] = {
+        0b00000,
+        0b00000,
+        0b00100,
+        0b00000,
+        0b00000
+    };
+
+    static constexpr uint8_t PlaceholderDot[5] = {
+        0b00000,
+        0b00000,
+        0b00100,
+        0b00000,
+        0b00000
+    };
+
     static constexpr uint8_t DigitFont[10][5] = {
         {0b11, 0b10, 0b10, 0b10, 0b11},
-        {0b01, 0b01, 0b01, 0b01, 0b01},
+        {0b01, 0b11, 0b01, 0b01, 0b11},
         {0b11, 0b01, 0b11, 0b10, 0b11},
         {0b11, 0b01, 0b11, 0b01, 0b11},
         {0b10, 0b10, 0b11, 0b01, 0b01},
         {0b11, 0b10, 0b11, 0b01, 0b11},
-        {0b11, 0b10, 0b11, 0b10, 0b11},
+        {0b10, 0b10, 0b11, 0b11, 0b11},
         {0b11, 0b01, 0b01, 0b01, 0b01},
-        {0b11, 0b10, 0b11, 0b10, 0b11},
-        {0b11, 0b10, 0b11, 0b01, 0b11}
+        {0b11, 0b11, 0b11, 0b11, 0b11},
+        {0b11, 0b11, 0b11, 0b01, 0b01}
     };
 
     inline void Write(uintptr_t Address, uint32_t Value) {
@@ -120,6 +150,42 @@ namespace {
 
     int32_t Abs(int32_t Value) {
         return Value < 0 ? -Value : Value;
+    }
+
+    uint32_t IntegerSquareRoot(uint64_t Value) {
+
+        uint64_t Result = 0;
+        uint64_t Bit = static_cast<uint64_t>(1) << 62;
+        while(Bit > Value) {
+            Bit >>= 2;
+        }
+
+        while(Bit != 0) {
+            if(Value >= Result + Bit) {
+                Value -= Result + Bit;
+                Result = (Result >> 1) + Bit;
+            } else {
+                Result >>= 1;
+            }
+
+            Bit >>= 2;
+        }
+
+        return static_cast<uint32_t>(Result);
+
+    }
+
+    uint32_t GetMagnitude(int16_t X, int16_t Y, int16_t Z) {
+
+        int32_t WideX = X;
+        int32_t WideY = Y;
+        int32_t WideZ = Z;
+        uint64_t Squared =
+            static_cast<uint64_t>(WideX * WideX) +
+            static_cast<uint64_t>(WideY * WideY) +
+            static_cast<uint64_t>(WideZ * WideZ);
+        return IntegerSquareRoot(Squared);
+
     }
 
     uint16_t ToneDuty = 0;
@@ -172,6 +238,157 @@ namespace {
         int16_t Z = 0;
     };
 
+    struct MagneticFieldSample {
+        int16_t X = 0;
+        int16_t Y = 0;
+        int16_t Z = 0;
+    };
+
+    enum class ScreenMode : uint8_t {
+        Speed,
+        Placeholder,
+        Compass
+    };
+
+    class Buttons {
+
+    public:
+
+        void Start() {
+
+            Write(Port0DirectionClear, (1u << ButtonAPin) | (1u << ButtonBPin));
+            Write(Port0PinConfigButtonA, InputConnectedPullUp);
+            Write(Port0PinConfigButtonB, InputConnectedPullUp);
+            PreviousA = IsDown(ButtonAPin);
+            PreviousB = IsDown(ButtonBPin);
+
+        }
+
+        bool APressed() {
+
+            return Pressed(ButtonAPin, PreviousA);
+
+        }
+
+        bool BPressed() {
+
+            return Pressed(ButtonBPin, PreviousB);
+
+        }
+
+    private:
+
+        bool IsDown(uint32_t Pin) {
+
+            return (Read(Port0Input) & (1u << Pin)) == 0;
+
+        }
+
+        bool Pressed(uint32_t Pin, bool& Previous) {
+
+            bool Current = IsDown(Pin);
+            bool Started = Current && !Previous;
+            Previous = Current;
+            return Started;
+
+        }
+
+        bool PreviousA = false;
+        bool PreviousB = false;
+
+    };
+
+    class LogoTouch {
+
+    public:
+
+        void Start() {
+
+            Write(DebugExceptionControl, Read(DebugExceptionControl) | (1u << 24));
+            Write(CycleCounter, 0);
+            Write(CycleCounterControl, Read(CycleCounterControl) | 1u);
+            Calibrate();
+
+        }
+
+        bool IsPressed() {
+
+            uint32_t ChargeTime = ReadChargeTime();
+            bool SamplePressed = ChargeTime >= Threshold;
+            if(SamplePressed == Pressed) {
+                SamplesMatchingNewState = 0;
+            } else {
+                SamplesMatchingNewState++;
+                if(SamplesMatchingNewState >= PressSamples) {
+                    Pressed = SamplePressed;
+                    SamplesMatchingNewState = 0;
+                }
+            }
+
+            return Pressed;
+
+        }
+
+    private:
+
+        void Calibrate() {
+
+            Baseline = 0;
+            for(uint32_t Sample = 0; Sample < CalibrationSamples; Sample++) {
+                uint32_t ChargeTime = ReadChargeTime();
+                if(ChargeTime > Baseline) {
+                    Baseline = ChargeTime;
+                }
+            }
+
+            Threshold = Baseline + (Baseline / 2) + 32;
+            if(Baseline >= MaximumChargeTime - 64) {
+                Threshold = MaximumChargeTime + 1;
+            } else if(Threshold > MaximumChargeTime) {
+                Threshold = MaximumChargeTime + 1;
+            }
+
+            SamplesMatchingNewState = 0;
+            Pressed = false;
+
+        }
+
+        uint32_t ReadChargeTime() {
+
+            Write(Port1DirectionSet, 1u << LogoPin);
+            Write(Port1OutputClear, 1u << LogoPin);
+            for(int Cycle = 0; Cycle < 32; Cycle++) {
+                __asm__ volatile("nop");
+            }
+
+            uint32_t StartCycle = Read(CycleCounter);
+            Write(Port1DirectionClear, 1u << LogoPin);
+            Write(Port1PinConfigLogo, Read(Port1PinConfigLogo) & ~(1u << 1));
+
+            uint32_t ChargeTime = 0;
+            while((Read(Port1Input) & (1u << LogoPin)) == 0) {
+                ChargeTime = Read(CycleCounter) - StartCycle;
+                if(ChargeTime >= MaximumChargeTime) {
+                    ChargeTime = MaximumChargeTime;
+                    break;
+                }
+            }
+
+            return ChargeTime;
+
+        }
+
+        static constexpr uint32_t CalibrationSamples = 16;
+        static constexpr uint32_t MaximumChargeTime = 64000;
+        static constexpr uint32_t PressSamples = 8;
+
+        uint32_t Baseline = 0;
+        uint32_t Threshold = 0;
+        uint32_t SamplesMatchingNewState = 0;
+        bool Pressed = false;
+
+    };
+
     class Accelerometer {
 
     public:
@@ -191,52 +408,58 @@ namespace {
             }
 
             Available = WriteRegister(0x20, 0x47) && WriteRegister(0x23, 0x88);
-            if(Available) {
-                AccelerationSample Sample = {};
-                if(ReadAcceleration(Sample)) {
-                    BaseX = Sample.X;
-                    BaseY = Sample.Y;
-                    BaseZ = Sample.Z;
-                }
-            }
-
         }
 
-        uint8_t ReadRunningSpeed() {
+        uint8_t ReadRunningSpeed(uint32_t CurrentTick) {
 
             AccelerationSample Sample = {};
             if(!Available || !ReadAcceleration(Sample)) {
                 return 0;
             }
 
-            if(ReadsSinceLastStep < MaximumStepGapReads) {
-                ReadsSinceLastStep++;
+            uint32_t Magnitude = GetMagnitude(Sample.X, Sample.Y, Sample.Z);
+            if(!BaselineReady) {
+                GravityBaseline = static_cast<int32_t>(Magnitude);
+                BaselineReady = true;
+                return 0;
             }
 
-            int32_t Movement = Abs(Sample.X - BaseX) + Abs(Sample.Y - BaseY) + Abs(Sample.Z - BaseZ);
-            if(Cooldown > 0) {
-                Cooldown--;
-            } else if(Movement > StepThreshold) {
-                if(ReadsSinceLastStep > 0 && ReadsSinceLastStep < StoppedGapReads) {
-                    uint8_t InstantSpeed = static_cast<uint8_t>(36u / ReadsSinceLastStep);
-                    if(InstantSpeed > 99) {
-                        InstantSpeed = 99;
-                    }
+            int32_t Difference = static_cast<int32_t>(Magnitude) - GravityBaseline;
+            GravityBaseline += Difference / 32;
+            uint32_t MotionMagnitude = static_cast<uint32_t>(Difference < 0 ? -Difference : Difference);
 
-                    Speed = static_cast<uint8_t>(((static_cast<uint16_t>(Speed) * 2u) + InstantSpeed) / 3u);
+            if(!AboveThreshold &&
+                MotionMagnitude >= StepThresholdMilligravity &&
+                CurrentTick - LastStep >= MinimumStepIntervalMilliseconds) {
+
+                if(SeenFirstStep) {
+                    uint32_t StepInterval = CurrentTick - LastStep;
+                    if(StepInterval <= StoppedIntervalMilliseconds) {
+                        uint32_t InstantSpeed = 18000u / StepInterval;
+                        if(InstantSpeed > 99) {
+                            InstantSpeed = 99;
+                        }
+
+                        Speed = static_cast<uint8_t>(((static_cast<uint16_t>(Speed) * 4u) + InstantSpeed) / 5u);
+                    }
+                } else {
+                    SeenFirstStep = true;
+                    Speed = 0;
                 }
 
-                ReadsSinceLastStep = 0;
-                Cooldown = StepCooldownReads;
+                LastStep = CurrentTick;
+                AboveThreshold = true;
+
+            } else if(AboveThreshold && MotionMagnitude <= ResetThresholdMilligravity) {
+
+                AboveThreshold = false;
+
             }
 
-            if(ReadsSinceLastStep >= StoppedGapReads) {
+            if(CurrentTick - LastStep >= StoppedIntervalMilliseconds) {
                 Speed = 0;
             }
 
-            BaseX = static_cast<int16_t>((static_cast<int32_t>(BaseX) * 7 + Sample.X) / 8);
-            BaseY = static_cast<int16_t>((static_cast<int32_t>(BaseY) * 7 + Sample.Y) / 8);
-            BaseZ = static_cast<int16_t>((static_cast<int32_t>(BaseZ) * 7 + Sample.Z) / 8);
             return Speed;
 
         }
@@ -321,17 +544,189 @@ namespace {
         }
 
         bool Available = false;
-        int16_t BaseX = 0;
-        int16_t BaseY = 0;
-        int16_t BaseZ = 0;
-        static constexpr int32_t StepThreshold = 220;
-        static constexpr uint8_t StepCooldownReads = 4;
-        static constexpr uint8_t StoppedGapReads = 20;
-        static constexpr uint8_t MaximumStepGapReads = 60;
+        static constexpr uint32_t StepThresholdMilligravity = 120;
+        static constexpr uint32_t ResetThresholdMilligravity = 60;
+        static constexpr uint32_t MinimumStepIntervalMilliseconds = 250;
+        static constexpr uint32_t StoppedIntervalMilliseconds = 2000;
 
+        int32_t GravityBaseline = 0;
+        uint32_t LastStep = 0;
         uint8_t Speed = 0;
-        uint8_t Cooldown = 0;
-        uint8_t ReadsSinceLastStep = MaximumStepGapReads;
+        bool BaselineReady = false;
+        bool AboveThreshold = false;
+        bool SeenFirstStep = false;
+
+    };
+
+    class Magnetometer {
+
+    public:
+
+        void Start() {
+
+            Write(I2cEnable, 0);
+            Write(I2cClockPinSelect, 8);
+            Write(I2cDataPinSelect, 16);
+            Write(I2cFrequency, 0x06400000);
+            Write(I2cEnable, 6);
+
+            uint8_t Identity = 0;
+            Available = ReadRegisters(0x4F, &Identity, 1) && Identity == 0x40;
+            if(!Available) {
+                return;
+            }
+
+            Available = WriteRegister(0x60, 0x80) && WriteRegister(0x62, 0x10);
+
+        }
+
+        uint8_t ReadHeading() {
+
+            MagneticFieldSample Sample = {};
+            if(!Available || !ReadMagneticField(Sample)) {
+                return Heading;
+            }
+
+            if(Sample.X < MinimumX) {
+                MinimumX = Sample.X;
+            }
+
+            if(Sample.X > MaximumX) {
+                MaximumX = Sample.X;
+            }
+
+            if(Sample.Y < MinimumY) {
+                MinimumY = Sample.Y;
+            }
+
+            if(Sample.Y > MaximumY) {
+                MaximumY = Sample.Y;
+            }
+
+            int32_t X = Sample.X;
+            int32_t Y = Sample.Y;
+            if(MaximumX - MinimumX >= 100 && MaximumY - MinimumY >= 100) {
+                X -= (static_cast<int32_t>(MinimumX) + MaximumX) / 2;
+                Y -= (static_cast<int32_t>(MinimumY) + MaximumY) / 2;
+            }
+
+            if(X != 0 || Y != 0) {
+                Heading = GetHeading(X, Y);
+            }
+
+            return Heading;
+
+        }
+
+    private:
+
+        static uint8_t GetHeading(int32_t X, int32_t Y) {
+
+            int32_t AbsoluteX = Abs(X);
+            int32_t AbsoluteY = Abs(Y);
+            bool MostlyVertical = static_cast<int64_t>(AbsoluteX) * 1000 <=
+                static_cast<int64_t>(AbsoluteY) * 414;
+            bool MostlyHorizontal = static_cast<int64_t>(AbsoluteY) * 1000 <=
+                static_cast<int64_t>(AbsoluteX) * 414;
+
+            if(MostlyVertical) {
+                return Y < 0 ? 0 : 4;
+            }
+
+            if(MostlyHorizontal) {
+                return X > 0 ? 2 : 6;
+            }
+
+            if(X > 0) {
+                return Y < 0 ? 1 : 3;
+            }
+
+            return Y > 0 ? 5 : 7;
+
+        }
+
+        bool WriteRegister(uint8_t Register, uint8_t Value) {
+
+            uint8_t Data[2] = {Register, Value};
+            return Transmit(0x1E, Data, 2);
+
+        }
+
+        bool ReadRegisters(uint8_t Register, uint8_t* Data, uint32_t Size) {
+
+            return WriteRead(0x1E, &Register, 1, Data, Size);
+
+        }
+
+        bool ReadMagneticField(MagneticFieldSample& Sample) {
+
+            uint8_t Data[6] = {};
+            if(!ReadRegisters(0x68, Data, 6)) {
+                return false;
+            }
+
+            Sample.X = static_cast<int16_t>(static_cast<uint16_t>(Data[0]) |
+                static_cast<uint16_t>(Data[1]) << 8);
+            Sample.Y = static_cast<int16_t>(static_cast<uint16_t>(Data[2]) |
+                static_cast<uint16_t>(Data[3]) << 8);
+            Sample.Z = static_cast<int16_t>(static_cast<uint16_t>(Data[4]) |
+                static_cast<uint16_t>(Data[5]) << 8);
+            return true;
+
+        }
+
+        bool WaitForTransaction() {
+
+            for(uint32_t Timeout = 0; Timeout < 1000000; Timeout++) {
+                if(Read(I2cStoppedEvent) != 0) {
+                    return Read(I2cErrorEvent) == 0;
+                }
+
+                if(Read(I2cErrorEvent) != 0) {
+                    Write(I2cStop, 1);
+                }
+            }
+
+            return false;
+
+        }
+
+        bool Transmit(uint8_t Address, const uint8_t* Data, uint32_t Size) {
+
+            Write(I2cStoppedEvent, 0);
+            Write(I2cErrorEvent, 0);
+            Write(I2cErrorSource, 0xFFFFFFFF);
+            Write(I2cShortcuts, 1u << 9);
+            Write(I2cTransmitPointer, reinterpret_cast<uintptr_t>(Data));
+            Write(I2cTransmitMaximum, Size);
+            Write(I2cAddress, Address);
+            Write(I2cStartTransmit, 1);
+            return WaitForTransaction();
+
+        }
+
+        bool WriteRead(uint8_t Address, const uint8_t* WriteData, uint32_t WriteSize, uint8_t* ReadData, uint32_t ReadSize) {
+
+            Write(I2cStoppedEvent, 0);
+            Write(I2cErrorEvent, 0);
+            Write(I2cErrorSource, 0xFFFFFFFF);
+            Write(I2cShortcuts, (1u << 7) | (1u << 12));
+            Write(I2cTransmitPointer, reinterpret_cast<uintptr_t>(WriteData));
+            Write(I2cTransmitMaximum, WriteSize);
+            Write(I2cReceivePointer, reinterpret_cast<uintptr_t>(ReadData));
+            Write(I2cReceiveMaximum, ReadSize);
+            Write(I2cAddress, Address);
+            Write(I2cStartTransmit, 1);
+            return WaitForTransaction();
+
+        }
+
+        bool Available = false;
+        int16_t MinimumX = 32767;
+        int16_t MaximumX = -32768;
+        int16_t MinimumY = 32767;
+        int16_t MaximumY = -32768;
+        uint8_t Heading = 0;
 
     };
 
@@ -374,9 +769,32 @@ namespace {
             uint8_t Right = Speed % 10;
 
             for(int Row = 0; Row < 5; Row++) {
-                uint8_t LeftBits = DigitFont[Left][Row];
-                uint8_t RightBits = DigitFont[Right][Row];
-                Framebuffer[Row] = static_cast<uint8_t>(LeftBits | (RightBits << 3));
+                Framebuffer[Row] = static_cast<uint8_t>(
+                    DigitRowToScreenBits(DigitFont[Left][Row], 0) |
+                    DigitRowToScreenBits(DigitFont[Right][Row], 3)
+                );
+            }
+
+        }
+
+        void ShowLogo() {
+
+            ShowFrame(LogoMark);
+
+        }
+
+        void ShowPlaceholder() {
+
+            ShowFrame(PlaceholderDot);
+
+        }
+
+        void ShowCompass(uint8_t Heading, uint16_t Frame) {
+
+            if(Frame % 6 >= 4) {
+                ShowDirectionLabel(Heading);
+            } else {
+                ShowCompassArrow(Heading);
             }
 
         }
@@ -425,6 +843,84 @@ namespace {
 
     private:
 
+        void SetPixel(int X, int Y) {
+
+            if(X < 0 || X >= 5 || Y < 0 || Y >= 5) {
+                return;
+            }
+
+            Framebuffer[Y] |= static_cast<uint8_t>(1u << X);
+
+        }
+
+        static uint8_t DigitRowToScreenBits(uint8_t Bits, uint8_t Offset) {
+
+            uint8_t Row = 0;
+            if((Bits & 0b10) != 0) {
+                Row |= static_cast<uint8_t>(1u << Offset);
+            }
+
+            if((Bits & 0b01) != 0) {
+                Row |= static_cast<uint8_t>(1u << (Offset + 1));
+            }
+
+            return Row;
+
+        }
+
+        void ShowCompassArrow(uint8_t Heading) {
+
+            static constexpr int Pixels[8][5][2] = {
+                {{2, 2}, {2, 1}, {2, 0}, {1, 1}, {3, 1}},
+                {{2, 2}, {3, 1}, {4, 0}, {3, 0}, {4, 1}},
+                {{2, 2}, {3, 2}, {4, 2}, {3, 1}, {3, 3}},
+                {{2, 2}, {3, 3}, {4, 4}, {3, 4}, {4, 3}},
+                {{2, 2}, {2, 3}, {2, 4}, {1, 3}, {3, 3}},
+                {{2, 2}, {1, 3}, {0, 4}, {1, 4}, {0, 3}},
+                {{2, 2}, {1, 2}, {0, 2}, {1, 1}, {1, 3}},
+                {{2, 2}, {1, 1}, {0, 0}, {1, 0}, {0, 1}}
+            };
+
+            ShowFrame(Blank);
+            for(const auto& Pixel : Pixels[Heading & 7]) {
+                SetPixel(Pixel[0], Pixel[1]);
+            }
+
+        }
+
+        void ShowDirectionLabel(uint8_t Heading) {
+
+            static constexpr uint8_t CardinalRows[4][5] = {
+                {0b10001, 0b11001, 0b10101, 0b10011, 0b10001},
+                {0b11111, 0b10000, 0b11110, 0b10000, 0b11111},
+                {0b01111, 0b10000, 0b01110, 0b00001, 0b11110},
+                {0b10001, 0b10001, 0b10101, 0b11011, 0b10001}
+            };
+
+            static constexpr uint8_t EdgeLetterRows[4][5] = {
+                {0b10, 0b11, 0b11, 0b11, 0b01},
+                {0b11, 0b10, 0b11, 0b10, 0b11},
+                {0b11, 0b10, 0b11, 0b01, 0b11},
+                {0b10, 0b10, 0b11, 0b11, 0b11}
+            };
+
+            Heading &= 7;
+            if((Heading & 1u) == 0) {
+                uint8_t Cardinal = (Heading + 1) / 2 % 4;
+                ShowFrame(CardinalRows[Cardinal]);
+                return;
+            }
+
+            uint8_t First = Heading < 4 ? 0 : 2;
+            uint8_t Second = Heading == 1 || Heading == 3 ? 1 : 3;
+            for(int Row = 0; Row < 5; Row++) {
+                Framebuffer[Row] = static_cast<uint8_t>(
+                    EdgeLetterRows[First][Row] | (EdgeLetterRows[Second][Row] << 3)
+                );
+            }
+
+        }
+
         void Scan(int Row) {
 
             Write(Port0OutputClear, RowMask);
@@ -468,14 +964,48 @@ extern "C" int main() {
 
     Display Screen;
     Accelerometer Motion;
+    Magnetometer Compass;
+    LogoTouch Logo;
+    Buttons Controls;
+    ScreenMode Mode = ScreenMode::Speed;
+    bool HomeHeld = false;
+    uint16_t CompassFrame = 0;
+    uint32_t CurrentTick = 0;
 
     Screen.BootAnimation();
     Motion.Start();
+    Compass.Start();
+    Logo.Start();
+    Controls.Start();
 
     while(true) {
 
-        Screen.ShowSpeed(Motion.ReadRunningSpeed());
+        bool HomePressed = Logo.IsPressed();
+        if(HomePressed && !HomeHeld) {
+            Mode = ScreenMode::Speed;
+        }
+
+        HomeHeld = HomePressed;
+
+        if(Controls.APressed()) {
+            Mode = ScreenMode::Compass;
+        }
+
+        if(Controls.BPressed()) {
+            Mode = ScreenMode::Placeholder;
+        }
+
+        if(Mode == ScreenMode::Speed) {
+            Screen.ShowSpeed(Motion.ReadRunningSpeed(CurrentTick));
+        } else if(Mode == ScreenMode::Placeholder) {
+            Screen.ShowPlaceholder();
+        } else {
+            Screen.ShowCompass(Compass.ReadHeading(), CompassFrame / 8);
+            CompassFrame++;
+        }
+
         Screen.Hold(100);
+        CurrentTick += 100;
 
     }
 
