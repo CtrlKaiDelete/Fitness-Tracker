@@ -15,7 +15,10 @@ namespace FitnessTracker {
     public:
 
         void Start();
+        void Update(uint32_t CurrentTick);
         uint8_t ReadRunningSpeed(uint32_t CurrentTick);
+        uint8_t GetRunningSpeed() const;
+        uint8_t GetCalories() const;
 
     private:
 
@@ -34,6 +37,7 @@ namespace FitnessTracker {
 
         int32_t GravityBaseline = 0;
         uint32_t LastStep = 0;
+        uint32_t TotalSteps = 0;
         uint8_t Speed = 0;
         bool BaselineReady = false;
         bool AboveThreshold = false;

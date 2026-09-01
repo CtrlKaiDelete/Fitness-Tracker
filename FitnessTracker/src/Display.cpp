@@ -39,14 +39,6 @@ namespace FitnessTracker {
             0b00000
         };
 
-        static constexpr uint8_t PlaceholderDot[5] = {
-            0b00000,
-            0b00000,
-            0b00100,
-            0b00000,
-            0b00000
-        };
-
         static constexpr uint8_t DigitFont[10][5] = {
             {0b11, 0b10, 0b10, 0b10, 0b11},
             {0b01, 0b11, 0b01, 0b01, 0b11},
@@ -103,10 +95,6 @@ namespace FitnessTracker {
             );
         }
 
-    }
-
-    void Display::ShowPlaceholder() {
-        ShowFrame(PlaceholderDot);
     }
 
     void Display::ShowCompass(uint8_t Heading, uint16_t Frame) {

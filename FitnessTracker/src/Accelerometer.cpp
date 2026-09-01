@@ -23,18 +23,20 @@ namespace FitnessTracker {
 
     }
 
-    uint8_t Accelerometer::ReadRunningSpeed(uint32_t CurrentTick) {
+    void Accelerometer::Update(uint32_t CurrentTick) {
 
         AccelerationSample Sample = {};
         if(!Available || !ReadAcceleration(Sample)) {
-            return 0;
+            Speed = 0;
+            return;
         }
 
         uint32_t Magnitude = GetMagnitude(Sample.X, Sample.Y, Sample.Z);
         if(!BaselineReady) {
             GravityBaseline = static_cast<int32_t>(Magnitude);
             BaselineReady = true;
-            return 0;
+            Speed = 0;
+            return;
         }
 
         int32_t Difference = static_cast<int32_t>(Magnitude) - GravityBaseline;
@@ -60,6 +62,7 @@ namespace FitnessTracker {
                 Speed = 0;
             }
 
+            TotalSteps++;
             LastStep = CurrentTick;
             AboveThreshold = true;
 
@@ -73,7 +76,27 @@ namespace FitnessTracker {
             Speed = 0;
         }
 
+    }
+
+    uint8_t Accelerometer::ReadRunningSpeed(uint32_t CurrentTick) {
+
+        Update(CurrentTick);
         return Speed;
+
+    }
+
+    uint8_t Accelerometer::GetRunningSpeed() const {
+        return Speed;
+    }
+
+    uint8_t Accelerometer::GetCalories() const {
+
+        uint32_t Calories = TotalSteps / 20;
+        if(Calories > 99) {
+            Calories = 99;
+        }
+
+        return static_cast<uint8_t>(Calories);
 
     }
 

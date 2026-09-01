@@ -12,7 +12,6 @@ namespace FitnessTracker {
 
         void ShowFrame(const uint8_t Frame[5]);
         void ShowSpeed(uint8_t Speed);
-        void ShowPlaceholder();
         void ShowCompass(uint8_t Heading, uint16_t Frame);
         void BootAnimation();
         void Hold(uint32_t Milliseconds);

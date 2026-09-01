@@ -1,13 +1,11 @@
 #pragma once
 
-#include <cstdint>
-
 namespace FitnessTracker {
 
     class Accelerometer;
     class Display;
 
-    class SpeedPage {
+    class CaloriesPage {
 
     public:
 

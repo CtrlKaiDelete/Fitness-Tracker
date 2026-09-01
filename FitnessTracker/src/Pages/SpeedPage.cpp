@@ -5,8 +5,8 @@
 
 namespace FitnessTracker {
 
-    void SpeedPage::Show(Display& Screen, Accelerometer& Motion, uint32_t CurrentTick) {
-        Screen.ShowSpeed(Motion.ReadRunningSpeed(CurrentTick));
+    void SpeedPage::Show(Display& Screen, Accelerometer& Motion) {
+        Screen.ShowSpeed(Motion.GetRunningSpeed());
     }
 
 }

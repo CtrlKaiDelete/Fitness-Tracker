@@ -15,7 +15,7 @@ extern "C" int main() {
     LogoTouch Logo;
     Buttons Controls;
     SpeedPage Speed;
-    PlaceholderPage Placeholder;
+    CaloriesPage Calories;
     CompassPage CompassScreen;
     StopwatchPage Stopwatch;
     ScreenMode Mode = ScreenMode::Speed;
@@ -30,6 +30,8 @@ extern "C" int main() {
     Controls.Start();
 
     while(true) {
+
+        Motion.Update(CurrentTick);
 
         bool HomePressed = Logo.IsPressed();
         if(HomePressed && !HomeHeld) {
@@ -52,18 +54,26 @@ extern "C" int main() {
             }
 
             if(Controls.BPressed()) {
-                Mode = ScreenMode::Placeholder;
+                Mode = ScreenMode::Calories;
             }
         }
 
-        if(Mode == ScreenMode::Speed) {
-            Speed.Show(Screen, Motion, CurrentTick);
-        } else if(Mode == ScreenMode::Placeholder) {
-            Placeholder.Show(Screen);
-        } else if(Mode == ScreenMode::Stopwatch) {
-            Stopwatch.Show(Screen, CurrentTick);
-        } else {
+        switch(Mode) {
+        case ScreenMode::Speed:
+            Speed.Show(Screen, Motion);
+            break;
+
+        case ScreenMode::Calories:
+            Calories.Show(Screen, Motion);
+            break;
+
+        case ScreenMode::Compass:
             CompassScreen.Show(Screen, Compass);
+            break;
+
+        case ScreenMode::Stopwatch:
+            Stopwatch.Show(Screen, CurrentTick);
+            break;
         }
 
         Screen.Hold(100);
